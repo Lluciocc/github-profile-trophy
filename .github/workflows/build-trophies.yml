@@ -1,0 +1,71 @@
+name: Generate profile trophy
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+
+  workflow_dispatch:
+
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Start trophy server
+        env:
+          PORT: 8080
+          GITHUB_TOKEN1: ${{ secrets.TROPHIES_TOKEN }}
+          GITHUB_TOKEN2: ${{ secrets.TROPHIES_TOKEN }}
+          GITHUB_API: https://api.github.com/graphql
+        run: |
+          deno task start > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Generate trophy SVG
+        run: |
+          curl \
+            --fail-with-body \
+            --retry 20 \
+            --retry-connrefused \
+            --retry-delay 1 \
+            "http://127.0.0.1:8080/?username=Lluciocc&theme=discord&no-frame=true&no-bg=true&margin-w=8&margin-h=8&column=7" \
+            --output /tmp/trophy.svg
+
+          test -s /tmp/trophy.svg
+          grep -q "<svg" /tmp/trophy.svg
+
+      - name: Stop trophy server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" || true
+          fi
+
+      - name: Publish SVG to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan generated-trophy
+          git rm -rf .
+
+          cp /tmp/trophy.svg trophy.svg
+
+          git add trophy.svg
+          git commit -m "Update profile trophy"
+          git push --force origin HEAD:gh-pages
